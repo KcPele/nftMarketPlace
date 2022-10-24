@@ -6,6 +6,6 @@ It is dynamic because it is not meant for only one NFT contract. it can interact
 
 
 #### Testing
--- Remix
--- deploy the basic nft contract
--- deploy the nft market contract
+* Remix
+* deploy the basic nft contract
+* deploy the nft market contract
