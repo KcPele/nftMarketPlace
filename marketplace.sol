@@ -3,6 +3,7 @@ pragma solidity ^0.8.7;
 
 import "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
+
 error NFTMarketplace__PriceMustBeAboveSero();
 error NFTMarketplace__NotApprovedForMarketplace();
 error NFTMarketplace__AlreadyListed(address nftAddress, uint256 tokenId);
@@ -11,71 +12,74 @@ error NFTMarketplace__NotListed(address nftAddress, uint256 tokenId);
 error NFTMarketplace__PriceNotMet(address nftAddress, uint256 tokenId, uint256 price);
 error NFTMarketplace__NoProceeds();
 error NFTMarketplace__transerFailed();
+
 contract NFTMarketplace is ReentrancyGuard{
-    constructor() {}
 
     struct Listing {
         uint256 price;
         address seller;
     }
-    //evnts
+
+    //events
     event ItemListed(
         address indexed buyer,
         address indexed nftAddress,
         uint256 indexed tokenId,
         uint256 price
     );
+
     event ItemBought(
         address indexed seller,
         address indexed nftAddress,
         uint256 indexed tokenId,
         uint256 price
     );
+
     event ItemCancelled(
         address indexed seller,
         address indexed nftAddress,
         uint256 indexed tokenId
     );
-    mapping(address => mapping(uint256 => Listing)) private s_listings;
+
+    mapping(address => mapping(uint256 => Listing)) private listings;
 
     //seller to amount earned
-    mapping(address => uint256) private s_proceeds;
+    mapping(address => uint256) private proceeds;
+
     modifier notListed(
         address _nftAddress,
         uint256 _tokenId
     ) {
-        Listing memory listing = s_listings[_nftAddress][_tokenId];
+        Listing memory listing = listings[_nftAddress][_tokenId];
         if (listing.price > 0) {
             revert NFTMarketplace__AlreadyListed(_nftAddress, _tokenId);
         }
         _;
     }
+
     modifier isListed(
         address _nftAddress,
         uint256 _tokenId
     ) {
-        Listing memory listing = s_listings[_nftAddress][_tokenId];
+        Listing memory listing = listings[_nftAddress][_tokenId];
         if (listing.price <= 0) {
             revert NFTMarketplace__NotListed(_nftAddress, _tokenId);
         }
         _;
     }
+
     modifier isOwner(
         address _nftAddress,
-        uint256 _tokenId,
-        address _spender
+        uint256 _tokenId
     ) {
         IERC721 nft = IERC721(_nftAddress);
-        address owner = nft.ownerOf(_tokenId);
-        if (_spender != owner) {
+        if (msg.sender != nft.ownerOf(_tokenId)) {
             revert NFTMarketplace__NotOwner();
         }
         _;
     }
 
-    //////////////////
-    /// Main Functions //abi//===
-    //////////////////abi
+
     function listItem(
         address _nftAddress,
         uint256 _tokenId,
@@ -83,7 +87,7 @@ contract NFTMarketplace is ReentrancyGuard{
     )
         external
         notListed(_nftAddress, _tokenId)
-        isOwner(_nftAddress, _tokenId, msg.sender)
+        isOwner(_nftAddress, _tokenId)
     {
         if (_price <= 0) {
             revert NFTMarketplace__PriceMustBeAboveSero();
@@ -93,43 +97,43 @@ contract NFTMarketplace is ReentrancyGuard{
             revert NFTMarketplace__NotApprovedForMarketplace();
         }
 
-        s_listings[_nftAddress][_tokenId] = Listing(_price, msg.sender);
+        listings[_nftAddress][_tokenId] = Listing(_price, msg.sender);
 
         emit ItemListed(msg.sender, _nftAddress, _tokenId, _price);
     }
 
     function buyItem(address _nftAddress, uint256 _tokenId) 
     external payable nonReentrant isListed(_nftAddress, _tokenId) {
-        Listing memory listedItem = s_listings[_nftAddress][_tokenId];
+        Listing memory listedItem = listings[_nftAddress][_tokenId];
         if(msg.value < listedItem.price) {
             revert NFTMarketplace__PriceNotMet(_nftAddress, _tokenId, listedItem.price);
         }
-        s_proceeds[listedItem.seller] = s_proceeds[listedItem.seller] + msg.value;
-        delete (s_listings[_nftAddress][_tokenId]);
+        proceeds[listedItem.seller] = proceeds[listedItem.seller] + msg.value;
+        delete (listings[_nftAddress][_tokenId]);
         IERC721(_nftAddress).safeTransferFrom(listedItem.seller, msg.sender, _tokenId);
 
         emit ItemBought(msg.sender, _nftAddress, _tokenId, listedItem.price);
     }
 
     function cancelListing(address _nftAddress, uint256 _tokenId) external 
-    isOwner(_nftAddress, _tokenId, msg.sender) isListed(_nftAddress, _tokenId) {
-        delete (s_listings[_nftAddress][_tokenId]);
+    isOwner(_nftAddress, _tokenId) isListed(_nftAddress, _tokenId) {
+        delete (listings[_nftAddress][_tokenId]);
         emit ItemCancelled(msg.sender, _nftAddress, _tokenId);
     }
 
     function updateListing(address _nftAddress, uint256 _tokenId, uint256 _newPrice) external 
-    isOwner(_nftAddress, _tokenId, msg.sender) isListed(_nftAddress, _tokenId) {
-        s_listings[_nftAddress][_tokenId].price = _newPrice;
+    isOwner(_nftAddress, _tokenId) isListed(_nftAddress, _tokenId) {
+        listings[_nftAddress][_tokenId].price = _newPrice;
         emit ItemListed(msg.sender, _nftAddress, _tokenId, _newPrice);
     }
 
     function withdrawProceeds() external payable {
-        uint256 proceeds = s_proceeds[msg.sender];
-        if(proceeds <= 0){
+        uint256 _proceeds = proceeds[msg.sender];
+        if(_proceeds <= 0){
             revert NFTMarketplace__NoProceeds();
         }
-        s_proceeds[msg.sender] = 0;
-        (bool sent, ) = payable(msg.sender).call{value: proceeds}("");
+        proceeds[msg.sender] = 0;
+        (bool sent, ) = payable(msg.sender).call{value: _proceeds}("");
         if(!sent){
             revert NFTMarketplace__transerFailed();
         }
@@ -137,10 +141,10 @@ contract NFTMarketplace is ReentrancyGuard{
 
    //getters
    function getListing(address _nftAddress, uint256 _tokenId) external view returns(Listing memory){
-       return s_listings[_nftAddress][_tokenId];
+       return listings[_nftAddress][_tokenId];
    }
    function getProceeds(address seller) external view returns(uint256){
-      return s_proceeds[seller];
+      return proceeds[seller];
    }
 
 }
